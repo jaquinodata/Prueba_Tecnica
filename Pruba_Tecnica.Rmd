@@ -1,0 +1,372 @@
+---
+title: "Prestadores: Prueba Técnica"
+author: "Jorge Luis Aquino Olmos"
+date: "2024-04-06"
+output: 
+  html_document: 
+    toc: true
+  pdf_document: 
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r include=FALSE, warning=FALSE}
+# Instalación del paquete y librería para conexión a SqLite
+#install.packages("RSQLite")
+library(RSQLite)
+library(dplyr)
+library(knitr)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+library(zoo) # Para realizar la imputación
+```
+
+### 1. Carga de los datos
+
+Carga de los datos: Se ha encontrado un problema al intentar cargar el archivo prestadores.csv debido a un error de codificación, que suele surgir cuando el archivo contiene caracteres que no están en el formato UTF-8. Para resolver este inconveniente, se adoptó la estrategia de cargar el archivo especificando una codificación diferente, como 'ISO-8859-1' o 'latin1', que son comunes en archivos que incluyen caracteres especiales no presentes en el alfabeto inglés. Esta acción permitió sortear el obstáculo inicial relacionado con la codificación del archivo, asegurando que los caracteres especiales se interpreten correctamente durante el proceso de carga.
+
+Posteriormente, se procedió a superar desafíos adicionales relacionados con la codificación y delimitación del archivo prestadores.csv. Específicamente, se estableció la codificación como 'ISO-8859-1' y se especificó el delimitador como ';' para asegurar una interpretación precisa de los datos. Este enfoque permitió una carga exitosa del archivo, garantizando que los caracteres especiales se manejen adecuadamente y que la estructura tabular de los datos se preserve correctamente. Con estos ajustes, se allanó el camino para realizar un análisis exploratorio y descriptivo más detallado de los datos contenidos en el archivo prestadores.csv.
+
+```{r include=FALSE}
+####################################################################################################################### 
+# Conexión a los datos
+########################################################################################################################
+# Establecer conexión con la base de datos
+data <- dbConnect(RSQLite::SQLite(), dbname = "C:/Users/jorge/OneDrive/Escritorio/Prueba Tecnica/datos.db")
+
+# Ejecutar consulta SQL para obtener datos de la tabla "Prestadores"
+prestadores <- dbGetQuery(data, "SELECT * FROM Prestadores")
+
+# Ejecutar consulta SQL para obtener datos de la tabla "Municipios"
+municipios <- dbGetQuery(data, "SELECT Departamento, Municipio, Poblacion, REPLACE(Superficie, ',', '.') AS Superficie, Irural FROM Municipios")
+
+# Renombrar Bogotá a Bogotá D.C. en la columna "Departamento" del dataset municipios
+municipios$Departamento <- ifelse(municipios$Departamento == "Bogotá", "Bogotá D.C", municipios$Departamento)
+
+# Renombrar del dataset prestadores
+prestadores <- prestadores |>
+  mutate(depa_nombre = case_when(
+    depa_nombre == "Barranquilla" ~ "Atlántico",
+    depa_nombre == "Buenaventura" | depa_nombre == "Cali" | depa_nombre == "Valle del cauca" ~ "Valle del Cauca",
+    depa_nombre == "Cartagena" ~ "Bolívar",
+    depa_nombre == "Santa Marta" ~ "Magdalena",
+    depa_nombre == "San Andrés y Providencia" ~ "San Andrés",
+    TRUE ~ depa_nombre  # Mantener el valor original si no coincide con ninguna de las condiciones anteriores
+  ))
+
+# Cerrar la conexión con la base de datos
+dbDisconnect(data)
+```
+
+### 2. Análisis Descriptivo General
+Comenzaremos con un análisis descriptivo general de ambos datasets para tener una visión global de los datos.
+Dataset prestadores:
+
+El dataset de prestadores de servicios contiene información diversa sobre 60,946 registros únicos, distribuidos en 38 departamentos y 914 municipios diferentes. Algunas observaciones clave incluyen:
+
+La mayoría de los registros provienen de Bogotá D.C., lo que indica una alta concentración de prestadores en la capital del país.
+Hay una amplia variedad de prestadores, con 58,562 nombres únicos registrados, aunque algunos nombres se repiten, lo que sugiere la presencia de entidades con múltiples registros o sucursales.
+La columna clpr_nombre (clase de prestador) muestra que hay 4 categorías únicas, con 'Profesional Independiente' siendo probablemente la más común.
+La naturaleza jurídica (naju_nombre) y el nivel de atención (nivel) son otros aspectos importantes registrados.
+Notablemente, hay 58,711 NITs únicos y 57,270 razones sociales únicas, lo que indica una diversidad significativa en los tipos de prestadores de servicios.
+Se observa que la columna ese (que parece indicar si son entidades sin ánimo de lucro o algo similar) tiene solo dos valores únicos, pero solo está presente en 10,704 registros.
+
+
+```{r echo=FALSE, warning= FALSE}
+
+## Crear la tabla radicacionesDepartamento
+radicacionesDepartamento <- prestadores |>
+  group_by(depa_nombre)|>
+ summarise(countDep = n()) |>
+  ungroup() |>
+  arrange(desc(countDep)) |>
+   head(10) 
+
+### Mostrar la tabla en formato Markdown
+# print(kable(radicacionesDepartamento, format = "markdown", col.names = c("Departamento", "Cantidad" )))
+### Gráfico del número de radicaciones por departamento con formato elegante y orden decreciente
+ggplot(radicacionesDepartamento, aes(y = reorder(depa_nombre, countDep), x = countDep)) +
+  geom_bar(stat = "identity", fill = "#0072B2") +
+  labs(title = "Prestadores de servicios por departamento", x = "", y = "") +
+  theme_minimal()
+```
+
+### 3. Municipios
+
+La distribución geográfica y demográfica de los municipios colombianos es un reflejo de la variedad de paisajes y poblaciones que conforman el país, desde las zonas urbanas densamente pobladas hasta las regiones rurales dispersas. En este sentido, nos sumergimos en el estudio de características clave como la población, la superficie y el índice de ruralidad de cada municipio, reconociendo la importancia de estos datos para la planificación y el desarrollo equitativo a nivel local y nacional.
+
+Por ello no podemos pasar por alto la relevancia de los prestadores de servicios en este análisis. La distribución de estos proveedores en los diferentes municipios no solo refleja las dinámicas económicas y sociales de cada región, sino que también tiene un impacto significativo en el acceso y la calidad de los servicios disponibles para la población. Por lo tanto, al explorar la diversidad geográfica y demográfica de Colombia, también nos enfocamos en entender la distribución de los prestadores de servicios y su relación con las características locales.
+
+```{r echo=FALSE, warning= FALSE}
+# (Top 10) Población y superficie por Departamento y ordenados por población:
+
+totalPoblacion <- municipios |>
+  mutate(Superficie = as.numeric(Superficie)) |>
+  group_by(Departamento) |>
+  summarise(Población = sum(Poblacion), Superficie = sum(Superficie)) |>
+  arrange(desc(Población)) |>
+  head(10)
+# Agregar título a la tabla
+totalPoblacion_tabla <- totalPoblacion |>
+  kable("html", align = "l") |>
+  kable_styling() |>
+  add_header_above(c("(Top 10) Población y superficie por Departamento" = 3))
+
+# Imprimir tabla con título
+totalPoblacion_tabla
+
+```
+
+### 4. Relación entre la Cantidad de Prestadores y Características Demográficas de los Municipios
+Para explorar la relación entre la cantidad de prestadores de servicios y las características demográficas de los municipios (población y superficie), necesitaríamos combinar la información de los dos datasets. Debido a la variabilidad en la codificación de los nombres de los municipios y departamentos, este paso puede requerir una normalización de los datos para asegurar una combinación precisa.
+
+Sin embargo, la inspección inicial sugiere que una mayor población en un municipio podría correlacionarse con una mayor cantidad de prestadores, dado el número elevado de prestadores en Bogotá D.C. Este patrón probablemente se repita en otros centros urbanos principales.
+
+Para realizar un análisis de clusterización con los datos disponibles, primero necesitamos definir las características (variables) que utilizaremos para agrupar los datos. Dado que tenemos dos conjuntos de datos principales, podríamos considerar varias opciones:
+
+Prestadores de Servicios: Utilizar características como la naturaleza jurídica, el tipo de prestador, entre otros, para agrupar los prestadores de servicios. Sin embargo, muchas de estas variables son categóricas y requerirían un preprocesamiento adecuado (por ejemplo, codificación One-Hot) antes de la clusterización.
+
+Municipios: Utilizar datos demográficos y geográficos, como población, superficie, e índice de ruralidad para agrupar los municipios. Esta opción parece más directa y podría ofrecer insights interesantes sobre cómo se agrupan los municipios según sus características.
+
+
+
+
+```{r echo=FALSE, warning= FALSE}
+##################################################################################################
+muni_Prestadores <- length(unique(prestadores$muni_nombre))
+muni_Municipios  <- length(unique(municipios$Municipio))
+
+cat("Cantidad de municipios en prestadores =", muni_Prestadores, "\n")
+cat("Cantidad de municipios en Municipios =", muni_Municipios, "\n")
+
+# Obtener los nombres únicos de municipios del dataset de prestadores
+nombres_muni_prestadores <- unique(prestadores$muni_nombre)
+
+# Obtener los nombres únicos de municipios del dataset de municipios
+nombres_muni_municipios <- unique(municipios$Municipio)
+
+# Encontrar los nombres de municipios del dataset de prestadores que no están en el dataset de Municipios
+nombres_no_en_municipios <- setdiff(nombres_muni_prestadores, nombres_muni_municipios)
+conteo_municipios_faltantes_en_municipios <- length(nombres_no_en_municipios)
+#print(conteo_municipios_faltantes_en_municipios)
+
+
+cat("Cantidad de municipios en prestadores que no están en Municipios =", conteo_municipios_faltantes_en_municipios, "\n")
+
+
+# Imprimir los nombres de departamento del dataset de prestadores que no están en el dataset de municipios
+#cat("Nombres de municipios en el dataset de prestadores que no están en el dataset de municipios:\n")
+#cat(nombres_no_en_municipios, sep = "\n")
+
+###########################################################################################################
+
+# Obtener los nombres únicos de muni del dataset de municipios
+
+
+# Encontrar los nombres de departamento del dataset de municipios que no están en el dataset de prestadores
+nombres_no_en_prestadores <- setdiff(nombres_muni_municipios, nombres_muni_prestadores)
+
+# Imprimir los nombres de departamento del dataset de municipios que no están en el dataset de prestadores
+#cat("Nombres de departamento en el dataset de municipios que no están en el dataset de prestadores:\n")
+#cat(nombres_no_en_prestadores, sep = "\n")
+
+conteo_municipios_faltantes_en_prestadores <- length(nombres_no_en_prestadores)
+# print(conteo_municipios_faltantes_en_prestadores)
+
+cat("Cantidad de municipios en Municipios que no están en prestadores =", conteo_municipios_faltantes_en_prestadores, "\n")
+```
+Es evidente que existen discrepancias notables en los nombres de los municipios entre ambos conjuntos de datos. Este hallazgo subraya la importancia de abordar las discrepancias en la fuente de datos para garantizar la integridad y precisión de nuestro análisis. Tras una revisión exhaustiva, he identificado que las discrepancias en los nombres de los departamentos son considerablemente menores y, por ende, más manejables. Además, las diferencias encontradas en esta característica fueron subsanadas mediante el procedimiento previamente realizado y las correcciones aplicadas. Por consiguiente, hemos decidido enfocarnos en la unificación de características a través de los departamentos, aprovechando su menor número y las diferencias menos significativas encontradas en este nivel de agregación.
+
+###########################################################################################################
+
+
+### 5. Análisis de Clúster
+
+Utilizaré los datos demográficos y geográficos disponibles, tales como población, superficie e índice de ruralidad, para agrupar los departamentos. Esta estrategia nos brindará valiosos insights sobre cómo se organizan los departamentos en función de sus características, permitiéndonos identificar patrones y tendencias en la agrupación departamental basados en dichos atributos. Al concluir esta agrupación, procederemos a integrar ambos datasets para explorar la relación entre la cantidad de prestadores de servicios y las características demográficas de los municipios, enriqueciendo así nuestra comprensión de la estructura demográfica y geográfica del país, así como de las dinámicas que influyen en la distribución y configuración de los departamentos. Este enfoque integral no solo iluminará aspectos clave de la distribución de servicios en el territorio sino que también facilitará una evaluación más detallada de cómo las características de cada departamento afectan la disponibilidad y el acceso a dichos servicios.
+
+#################################################################################################
+### 5.1 Limpieza y preparación de los datos
+
+```{r echo=FALSE, warning=FALSE}
+# Librería para realizar el clúster
+library(cluster)
+
+municipio2 <- municipios |>
+  select(Departamento, Poblacion, Superficie, Irural)
+
+# Tipos de datos del dataset municipio2
+str(municipio2)
+
+# Eliminar las comillas dobles de los valores en la columna superficie
+municipio2$Superficie <- gsub('"', '', municipio2$Superficie)
+
+# Convertir la columna superficie a numérica
+municipio2$Superficie_numeric <- as.numeric(municipio2$Superficie)
+
+# Eliminar la columna Superficie que es caracter del conjunto de datos
+municipio2 <- municipio2[, !colnames(municipio2) %in% "Superficie"]
+
+# Renombrar la columna Superficie_numeric a Superficie
+colnames(municipio2)[colnames(municipio2) == "Superficie_numeric"] <- "Superficie"
+
+# Tipos de datos del conjunto municipio2
+str(municipio2)
+
+
+cantidad_na <- colSums(is.na(municipio2))
+# cantidad_na
+
+# Imputar la media en los valores faltantes de la población
+municipio2$Superficie <- na.aggregate(municipio2$Superficie, FUN = mean)
+
+cantidad_na <- colSums(is.na(municipio2))
+#cantidad_na
+
+# Normalizar las variables seleccionadas
+municipios_normalizados <- scale(municipio2[, -which(names(municipio2) == "Departamento")])
+
+
+
+```
+
+### 6. Agrupamiento por K-Medios (K-Means Clustering)
+
+En el método K-means, la cantidad óptima de centroides (clusters) no siempre se conoce de antemano y puede variar dependiendo de la estructura de los datos. Es por eso que es importante utilizar técnicas como el Método del Codo (Elbow Method) para determinar un valor apropiado para el número de clusters.
+
+Se aplicará la función kmeans al conjunto de datos, municipios_normalizados,  variando en cada caso el valor de k, y acumulando los valores de WCSS obtenidos:
+
+```{r echo=FALSE, warning=FALSE}
+
+# Fijar una semilla para reproducibilidad
+set.seed(1234)
+
+# Cargar las librerías necesarias
+library(cluster)
+
+
+# Almacenar los valores de la silueta
+silhouette_vals <- numeric()
+
+# Calcular la silueta para diferentes valores de k
+for (k in 2:10) {
+  km <- kmeans(municipios_normalizados, centers = k)
+  silhouette_vals[k - 1] <- mean(silhouette(km$cluster, dist(municipios_normalizados)))
+}
+
+# Crear gráfico de siluetas
+plot_data <- data.frame(Clusters = 2:10, Silhouette = silhouette_vals)
+ggplot(plot_data, aes(x = Clusters, y = Silhouette)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Número de clusters", y = "Valor promedio de la silueta") +
+  ggtitle("Gráfico de Siluetas para determinar el número óptimo de clusters")
+
+```
+
+Si bien es cierto que un valor más alto de la métrica de silueta sugiere una mejor separación entre los clusters, la elección del número óptimo de clusters también debe tomar en cuenta el contexto específico y el conocimiento del dominio. En ocasiones, es preferible seleccionar un número de clusters que sea más fácil de interpretar y tenga una mayor aplicabilidad práctica, incluso si esto significa no alcanzar el valor máximo de silueta. En este contexto, considero adecuado elegir K = 6, basándonos en el punto pico de la curva de silueta y en un punto medio de esta métrica. Esto nos permite lograr una agrupación efectiva de los datos mientras evitamos la sobreagrupación de entidades, lo que facilita la interpretación de los resultados y su aplicación en el contexto específico del problema.
+
+```{r echo=FALSE, warning=FALSE}
+
+# Aplicar K-means con K = 6 al dataset municipios_estandarizados
+k <- 6
+kmeans_result <- kmeans(municipios_normalizados, centers = k)
+
+
+# Agregar la columna de cluster al conjunto de datos original municipio2
+municipio2$Cluster <- as.factor(kmeans_result$cluster)
+
+```
+La clusterización de los municipios en seis grupos nos ofrece una interesante perspectiva sobre cómo se diferencian entre sí según las variables seleccionadas (población, superficie e índice de ruralidad):
+
+```{r echo=FALSE, warning=FALSE}
+# Función personalizada para calcular la moda
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+# Aplicar group_by y summarise
+resultados <- municipio2 |>
+  group_by(Cluster) |>
+  summarise(Cardinalidad = n(),
+            Media_Poblacion  = mean(Poblacion, na.rm = TRUE),
+            Media_Superficie = mean(Superficie, na.rm = TRUE),
+            Media_Irural     = mean(Irural),
+            Moda_Irural      = Mode(Irural)) |>
+            arrange(desc(Media_Poblacion))
+
+kable(resultados)
+
+```
+
+La composición de los clústeres revela una diversidad significativa entre ellos. El clúster 6, caracterizado por su elevada población, está compuesto únicamente por un departamento. Por otro lado, el clúster con mayor número de departamentos es el cuarto, aunque su media de población puede asemejarse al clúster 3, la disparidad entre ellos radica en la media de superficie y en la distribución de la ruralidad. Los clústeres 5 y 2 presentan similitudes en términos de población, pero difieren considerablemente en cuanto a la superficie media y la distribución de la ruralidad. En contraste, el clúster 1 se distingue claramente del resto, ya que sus 19 departamentos muestran diferencias significativas en todas las variables analizadas.
+
+```{r echo=FALSE, warning=FALSE}
+# Unir los dataset prestadors y municipio2 
+
+# Unir los datasets usando left_join y seleccionar columnas específicas de municipio2
+union <- prestadores |>
+  left_join(select(municipio2, Departamento, Superficie, Poblacion, Irural, Cluster), 
+            by = c("depa_nombre" = "Departamento"))
+
+
+# Calcular el conteo distintivo de la columna razon_social
+conteo_razon_social <- union|>
+  count(Cluster, razon_social, name = "Conteo_Razon_Social")
+
+# Aplicar group_by y summarise
+resultados2 <- union |>
+  group_by(Cluster) |>
+  summarise(Cardinalidad = n_distinct(depa_nombre),
+            Media_Poblacion  = mean(Poblacion, na.rm = TRUE),
+            Media_Superficie = mean(Superficie, na.rm = TRUE),
+            Media_Irural     = mean(Irural),
+            Prestadores      = n_distinct(razon_social))|>
+            arrange(desc(Media_Poblacion))
+            
+
+# Mostrar los resultados en formato tabla
+kable(resultados2)
+
+```
+### Análisis conjunto prestadores y deparatmentos
+
+El análisis de clusterización ha revelado una diversidad notable en la estructura de los departamentos de Colombia, mostrando variaciones en urbanización, tamaño y accesibilidad de servicios. Los departamentos agrupados en clusters con altas cifras de población y baja ruralidad exhiben una abundancia de prestadores de servicios, un reflejo directo de la demanda intensa característica de zonas urbanizadas con alta densidad de población. Esta correlación subraya la capacidad de las áreas metropolitanas para sostener y atraer una variedad de servicios, satisfaciendo así una gama más amplia de necesidades ciudadanas.
+
+Por otro lado, los clusters identificados por su marcada ruralidad evidencian un número menor de prestadores de servicios. Este patrón plantea interrogantes sobre la accesibilidad y suficiencia de los servicios en áreas rurales, lo que podría significar desafíos en términos de cobertura y calidad. Estos departamentos rurales pueden enfrentar obstáculos sustanciales que afectan la provisión de servicios esenciales, desde la atención de la salud hasta la educación y el comercio.
+
+Este análisis sirve como un punto de partida estratégico para la asignación equitativa de recursos y la elaboración de políticas públicas que se ajusten a las necesidades de cada cluster de departamentos. La creación de políticas adaptadas a estas agrupaciones podría optimizar los resultados y asegurar que los servicios estén disponibles donde más se necesiten.
+
+Para profundizar en este estudio, sería conveniente investigar la calidad y el espectro de los prestadores de servicios en cada cluster de departamentos. Un entendimiento detallado de estos factores contribuiría a una imagen más completa de cómo los servicios actuales satisfacen las demandas de las poblaciones locales y revelaría oportunidades para mejoras y expansiones en sectores donde existen déficits.
+
+En conjunto, el análisis demuestra la importancia de considerar la demografía y la geografía en la planificación de servicios y subraya la necesidad de estrategias diferenciadas que puedan abordar las disparidades en la distribución y calidad de los servicios entre los departamentos urbanos y rurales de Colombia.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
